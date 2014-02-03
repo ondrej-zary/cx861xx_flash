@@ -1,6 +1,6 @@
 cx861xx_flash - Conexant CX861xx USB Boot Flash Utility
-Copyright (c) 2012 Ondrej Zary - http://www.rainbow-software.org
 ================================================================
+Copyright (c) 2012 Ondrej Zary - http://www.rainbow-software.org
 
 This utility can access external flash ROM on boards/devices with Conexant CX861xx
 (CX86111/CX86113) Network Processors, such as Flarion Desktop Modem.
@@ -37,12 +37,12 @@ access the bottom side. With antenna connector positioned top left and connector
 on the right side, lift the shielding cover in the upper right corner.
 You should see gold pads in the following shape:
 
-        USB boot jumper
-        vvvv
-uP      |     |       GND
-           |       TX  |  RX
-_GND                |     |
-                     RS232
+            USB boot jumper
+            vvvv
+    uP      |     |       GND
+               |       TX  |  RX
+    _GND                |     |
+                         RS232
 
 Use a piece of wire to conect two left pads and apply power, keeping pads
 shorted. You can then remove the short.
@@ -51,4 +51,5 @@ v2: Remove bottom plastic and use a piece of wire to connect holes marked
 "USB BOOT".
 
 Conect USB cable to PC. You should something like this in lsusb:
-Bus 002 Device 002: ID 0572:cafc Conexant Systems (Rockwell), Inc. CX861xx ROM Boot Loader
+
+    Bus 002 Device 002: ID 0572:cafc Conexant Systems (Rockwell), Inc. CX861xx ROM Boot Loader
