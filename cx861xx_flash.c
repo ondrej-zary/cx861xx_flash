@@ -65,46 +65,7 @@ struct cx_fw_packet {
 	u8 data[56];
 } __attribute__((packed));
 
-/* Intel 28F320C3B definitions */
-#define FLASH_SIZE	0x400000
-
-#define FLASH_CMD_READ		0xff	/* Read Array */
-#define FLASH_CMD_ID		0x90	/* Read Identifier */
-#define FLASH_CMD_CFI		0x98	/* CFI Query */
-#define FLASH_CMD_READSTATUS	0x70	/* Read Status Register */
-#define FLASH_CMD_CLEARSTATUS	0x50	/* Clear Status Register */
-#define FLASH_CMD_PROGRAM	0x40	/* Program */
-#define FLASH_CMD_ERASE		0x20	/* Block Erase */
-#define FLASH_CMD_ERASECONFIRM	0xd0	/* Block Erase Confirm */
-#define FLASH_CMD_SUSPEND	0xb0	/* Program/Erase Suspend */
-#define FLASH_CMD_RESUME	0xd0	/* Program/Erase Resume */
-#define FLASH_CMD_LOCKMODE	0x60	/* Lock mode, use with next 3 commands: */
-#define FLASH_CMD_LOCK		0x01	/* Lock Block */
-#define FLASH_CMD_UNLOCK	0xd0	/* Unlock Block */
-#define FLASH_CMD_LOCKDOWN	0x2f	/* Lock-Down Block */
-#define FLASH_CMD_PROT		0xc0	/* Protection Program */
-
-#define FLASH_ST_READY		(1 << 7)	/* Write State Machine Status, 1 = READY */
-#define FLASH_ST_ERASESUSPEND	(1 << 6)	/* Erase-Suspend Status, 1 = SUSPENDED */
-#define FLASH_ST_ERASEERROR	(1 << 5)	/* Erase Status, 1 = ERROR */
-#define FLASH_ST_PROGRAMERROR	(1 << 4)	/* Program Status, 1 = ERROR */
-#define FLASH_ST_VPPERROR	(1 << 3)	/* VPP Status, 1 = VPP Low */
-#define FLASH_ST_PROGRAMSUSPEND (1 << 2)	/* Program-Suspend Status, 1 = SUSPENDED */
-#define FLASH_ST_LOCKED		(1 << 1)	/* Block Lock Status, 1 = LOCKED */
-
-#define FLASH_ST_ERROR_MASK	0x5a		/* erase, program, vpp, lock status */
-
-struct block_desc {
-	u32 count;
-	u32 size;
-};
-
-/* Intel 28F320C3B memory map */
-struct block_desc flash_blocks[] = {
-	{ .count = 8,	.size = 8192 },
-	{ .count = 63,	.size = 65536 },
-	{ .count = 0 }	/* end marker */
-};
+/********** memory access **********/
 
 int cx_read_mem(libusb_device_handle *dev, u32 addr, u32 count, u8 *buf, u8 access_type) {
 	struct cx_fw_packet packet;
@@ -178,6 +139,27 @@ int cx_write_mem(libusb_device_handle *dev, u32 addr, u32 count, u8 *buf, u8 acc
 	return 0;
 }
 
+/********** flash access **********/
+
+#define FLASH_CMD_ID		0x90	/* Read Identifier */
+#define FLASH_CMD_CFI		0x98	/* CFI Query */
+
+struct block_desc {
+	u32 count;
+	u32 size;
+};
+
+struct flash_chip {
+	u16 mfg;
+	u16 dev;
+	char name[32];
+	u32 size;
+	struct block_desc blocks[16];
+	void (*set_block_lock)(libusb_device_handle *dev, u32 addr, bool lock);
+	bool (*erase_block)(libusb_device_handle *dev, u32 addr);
+	bool (*program_block)(libusb_device_handle *dev, u32 addr, u16 *data, u32 size, bool slow);
+};
+
 u16 cx_flash_read(libusb_device_handle *dev, u32 addr) {
 	u16 data;
 
@@ -190,36 +172,62 @@ void cx_flash_write(libusb_device_handle *dev, u32 addr, u16 data) {
 	cx_write_mem(dev, flash_base + addr, 2, (void *)&data, MA_WORD);
 }
 
-void flash_decode_status(u16 status) {
+/********** Intel flash **********/
+
+#define INTEL_CMD_READ		0xff	/* Read Array */
+#define INTEL_CMD_READSTATUS	0x70	/* Read Status Register */
+#define INTEL_CMD_CLEARSTATUS	0x50	/* Clear Status Register */
+#define INTEL_CMD_PROGRAM	0x40	/* Program */
+#define INTEL_CMD_ERASE		0x20	/* Block Erase */
+#define INTEL_CMD_ERASECONFIRM	0xd0	/* Block Erase Confirm */
+#define INTEL_CMD_SUSPEND	0xb0	/* Program/Erase Suspend */
+#define INTEL_CMD_RESUME	0xd0	/* Program/Erase Resume */
+#define INTEL_CMD_LOCKMODE	0x60	/* Lock mode, use with next 3 commands: */
+#define INTEL_CMD_LOCK		0x01	/* Lock Block */
+#define INTEL_CMD_UNLOCK	0xd0	/* Unlock Block */
+#define INTEL_CMD_LOCKDOWN	0x2f	/* Lock-Down Block */
+#define INTEL_CMD_PROT		0xc0	/* Protection Program */
+
+#define INTEL_ST_READY		(1 << 7)	/* Write State Machine Status, 1 = READY */
+#define INTEL_ST_ERASESUSPEND	(1 << 6)	/* Erase-Suspend Status, 1 = SUSPENDED */
+#define INTEL_ST_ERASEERROR	(1 << 5)	/* Erase Status, 1 = ERROR */
+#define INTEL_ST_PROGRAMERROR	(1 << 4)	/* Program Status, 1 = ERROR */
+#define INTEL_ST_VPPERROR	(1 << 3)	/* VPP Status, 1 = VPP Low */
+#define INTEL_ST_PROGRAMSUSPEND (1 << 2)	/* Program-Suspend Status, 1 = SUSPENDED */
+#define INTEL_ST_LOCKED		(1 << 1)	/* Block Lock Status, 1 = LOCKED */
+
+#define INTEL_ST_ERROR_MASK	0x5a		/* erase, program, vpp, lock status */
+
+void intel_decode_status(u16 status) {
 	printf("Status decode: ");
-	if (status & FLASH_ST_READY)
+	if (status & INTEL_ST_READY)
 		printf("READY ");
-	if (status & FLASH_ST_ERASESUSPEND)
+	if (status & INTEL_ST_ERASESUSPEND)
 		printf("ERASE_SUSPEND ");
-	if (status & FLASH_ST_ERASEERROR)
+	if (status & INTEL_ST_ERASEERROR)
 		printf("ERASE_ERROR ");
-	if (status & FLASH_ST_PROGRAMERROR)
+	if (status & INTEL_ST_PROGRAMERROR)
 		printf("PROGRAM_ERROR ");
-	if (status & FLASH_ST_VPPERROR)
+	if (status & INTEL_ST_VPPERROR)
 		printf("VPP_ERROR ");
-	if (status & FLASH_ST_PROGRAMSUSPEND)
+	if (status & INTEL_ST_PROGRAMSUSPEND)
 		printf("PROGRAM_SUSPEND ");
-	if (status & FLASH_ST_LOCKED)
+	if (status & INTEL_ST_LOCKED)
 		printf("LOCKED ");
 	printf("\n");
 }
 
-bool flash_erase_block(libusb_device_handle *dev, u32 addr) {
+bool intel_erase_block(libusb_device_handle *dev, u32 addr) {
 	u16 status;
 	u32 i = 0;
 
 	printf("Erasing block     0x%06x: ", addr);
 	fflush(stdout);
-	cx_flash_write(dev, 0, FLASH_CMD_CLEARSTATUS);
-	cx_flash_write(dev, 0, FLASH_CMD_READSTATUS);
+	cx_flash_write(dev, 0, INTEL_CMD_CLEARSTATUS);
+	cx_flash_write(dev, 0, INTEL_CMD_READSTATUS);
 
-	cx_flash_write(dev, addr, FLASH_CMD_ERASE);
-	cx_flash_write(dev, addr, FLASH_CMD_ERASECONFIRM);
+	cx_flash_write(dev, addr, INTEL_CMD_ERASE);
+	cx_flash_write(dev, addr, INTEL_CMD_ERASECONFIRM);
 	do {
 		status = cx_flash_read(dev, 0);
 		if (i % 4 == 0) {
@@ -227,13 +235,13 @@ bool flash_erase_block(libusb_device_handle *dev, u32 addr) {
 			fflush(stdout);
 		}
 		i++;
-	} while (!(status & FLASH_ST_READY));
+	} while (!(status & INTEL_ST_READY));
 
-	cx_flash_write(dev, 0, FLASH_CMD_READ);
+	cx_flash_write(dev, 0, INTEL_CMD_READ);
 
-	if (status & FLASH_ST_ERROR_MASK) {
+	if (status & INTEL_ST_ERROR_MASK) {
 		printf("Error!\n");
-		flash_decode_status(status);
+		intel_decode_status(status);
 		return false;
 	}
 	printf("\n");
@@ -241,23 +249,23 @@ bool flash_erase_block(libusb_device_handle *dev, u32 addr) {
 	return true;
 }
 
-void flash_optimized_program_word(libusb_device_handle *dev, u32 addr, u16 data) {
+void intel_optimized_program_word(libusb_device_handle *dev, u32 addr, u16 data) {
 	u16 buf[2];
 
 	/* merge PROGRAM command and data into one write */
-	buf[0] = FLASH_CMD_PROGRAM;
+	buf[0] = INTEL_CMD_PROGRAM;
 	buf[1] = data;
 	cx_write_mem(dev, flash_base + addr - 2, 4, (void *)buf, MA_WORD);
 }
 
-bool flash_program_block(libusb_device_handle *dev, u32 addr, u16 *data, u32 size, bool slow) {
+bool intel_program_block(libusb_device_handle *dev, u32 addr, u16 *data, u32 size, bool slow) {
 	u16 status;
 	u32 i;
 
 	printf("Programming block 0x%06x: ", addr);
 	fflush(stdout);
-	cx_flash_write(dev, 0, FLASH_CMD_CLEARSTATUS);
-	cx_flash_write(dev, 0, FLASH_CMD_READSTATUS);
+	cx_flash_write(dev, 0, INTEL_CMD_CLEARSTATUS);
+	cx_flash_write(dev, 0, INTEL_CMD_READSTATUS);
 
 	/* Program each 16-byte word */
 	for (i = 0; i < size / 2; i++) {
@@ -272,39 +280,58 @@ bool flash_program_block(libusb_device_handle *dev, u32 addr, u16 *data, u32 siz
 
 		if (i == 0) {
 			/* first word can't be optimized */
-			cx_flash_write(dev, addr, FLASH_CMD_PROGRAM);
+			cx_flash_write(dev, addr, INTEL_CMD_PROGRAM);
 			cx_flash_write(dev, addr + i * 2, data[i]);
 		} else
-			flash_optimized_program_word(dev, addr + i * 2, data[i]);
+			intel_optimized_program_word(dev, addr + i * 2, data[i]);
 
 		/* USB is so slow that we don't need to wait for programming to end */
 		if (slow) {
 			/* But it might be useful so it's an option */
 			do {
 				status = cx_flash_read(dev, 0);
-			} while (!(status & FLASH_ST_READY));
+			} while (!(status & INTEL_ST_READY));
 
-			if (status & FLASH_ST_ERROR_MASK) {
+			if (status & INTEL_ST_ERROR_MASK) {
 				printf("Error!\n");
-				flash_decode_status(status);
-				cx_flash_write(dev, 0, FLASH_CMD_READ);
+				intel_decode_status(status);
+				cx_flash_write(dev, 0, INTEL_CMD_READ);
 				return false;
 			}
 		}
 	}
 
-	cx_flash_write(dev, 0, FLASH_CMD_READ);
+	cx_flash_write(dev, 0, INTEL_CMD_READ);
 	printf("\n");
 
 	return true;
 }
 
-void flash_set_block_lock(libusb_device_handle *dev, u32 addr, bool lock) {
-	cx_flash_write(dev, addr, FLASH_CMD_LOCKMODE);
-	cx_flash_write(dev, addr, lock ? FLASH_CMD_LOCK : FLASH_CMD_UNLOCK);
+void intel_set_block_lock(libusb_device_handle *dev, u32 addr, bool lock) {
+	cx_flash_write(dev, addr, INTEL_CMD_LOCKMODE);
+	cx_flash_write(dev, addr, lock ? INTEL_CMD_LOCK : INTEL_CMD_UNLOCK);
 }
 
-void flash_identify(libusb_device_handle *dev) {
+/********** flash parameters **********/
+
+struct flash_chip supported_chips[] = {
+	{
+		.mfg = 0x0089, .dev = 0x88c5, .name = "Intel 28F320C3B", .size = 4*1024*1024,
+		.blocks = {
+				{ .count = 8,	.size = 8192 },
+				{ .count = 63,	.size = 65536 },
+				{ .count = 0 }	/* end marker */
+		},
+		.set_block_lock = intel_set_block_lock,
+		.erase_block = intel_erase_block,
+		.program_block = intel_program_block,
+	},
+	{ .mfg = 0 }	/* end marker */
+};
+
+struct flash_chip *flash_identify(libusb_device_handle *dev) {
+	struct flash_chip *flash = NULL;
+
 	/* Send READ IDENTIFIER command */
 	cx_flash_write(dev, 0, FLASH_CMD_ID);
 
@@ -313,15 +340,17 @@ void flash_identify(libusb_device_handle *dev) {
 	u16 flash_dev = cx_flash_read(dev, 2);
 
 	/* Send READ ARRAY command (exit identifier mode) */
-	cx_flash_write(dev, 0, FLASH_CMD_READ);
+	cx_flash_write(dev, 0, INTEL_CMD_READ);
 
 	printf("Flash ID: Mfg ID=0x%04x, Device ID=0x%04x: ", flash_mfg, flash_dev);
-	if (flash_mfg == 0x0089 && flash_dev == 0x88c5)
-		printf("Intel 28F320C3B\n");
-	else {
-		printf("Unsupported flash type\n");
-		exit(6);
-	}
+	for (int i = 0; supported_chips[i].mfg != 0; i++)
+		if (supported_chips[i].mfg == flash_mfg &&
+		    supported_chips[i].dev == flash_dev) {
+			flash = &supported_chips[i];
+			break;
+		}
+
+	return flash;
 }
 
 void usage() {
@@ -330,8 +359,6 @@ void usage() {
 	printf(" write     = write from FILE to flash\n");
 	printf(" writeslow = write from FILE to flash, check status after each word\n");
 }
-
-#define BUF_SIZE FLASH_SIZE
 
 int main(int argc, char *argv[])
 {
@@ -375,21 +402,27 @@ int main(int argc, char *argv[])
 		exit(3);
 	}
 
-	u8 *buf = malloc(BUF_SIZE);
-	if (!buf) {
-		fprintf(stderr, "Memory allocation error, %d bytes required.\n", BUF_SIZE);
-		exit(4);
-	}
-
 	if (cx861xx) {	/* Enable FLASH access */
 		u8 data = 1;
 		cx_write_mem(dev, CX861XX_FLASH_ENABLE, 1, &data, MA_BYTE);
 	}
 
 	/* Send READ ARRAY command to reset flash */
-	cx_flash_write(dev, 0, FLASH_CMD_READ);
+	cx_flash_write(dev, 0, INTEL_CMD_READ);
 
-	flash_identify(dev);
+	struct flash_chip *flash = flash_identify(dev);
+	if (!flash) {
+		printf("Unsupported flash type\n");
+		exit(6);
+	}
+	printf("%s\n", flash->name);
+	struct block_desc *flash_blocks = flash->blocks;
+
+	u8 *buf = malloc(flash->size);
+	if (!buf) {
+		fprintf(stderr, "Memory allocation error, %d bytes required.\n", flash->size);
+		exit(4);
+	}
 
 	if (!strcmp(argv[1], "write") || !strcmp(argv[1], "writeslow")) {
 		bool slow = false;
@@ -402,19 +435,21 @@ int main(int argc, char *argv[])
 			exit(5);
 		}
 
-		int len = fread(buf, 1, BUF_SIZE, f);
-		if (len < BUF_SIZE) {
-			fprintf(stderr, "Error reading file, must be %d bytes long\n", BUF_SIZE);
+		u32 len = fread(buf, 1, flash->size, f);
+		if (len < flash->size) {
+			fprintf(stderr, "Error reading file, must be %d bytes long\n", flash->size);
 			exit(5);
 		}
 
 		u32 addr = 0;
 		for (u32 i = 0; flash_blocks[i].count > 0; i++) {
 			for (u32 j = 0; j < flash_blocks[i].count; j++) {
-				flash_set_block_lock(dev, addr, false);
-				flash_erase_block(dev, addr);
-				flash_program_block(dev, addr, (void *) buf + addr, flash_blocks[i].size, slow);
-				flash_set_block_lock(dev, addr, true);
+				if (flash->set_block_lock)
+					flash->set_block_lock(dev, addr, false);
+				flash->erase_block(dev, addr);
+				flash->program_block(dev, addr, (void *) buf + addr, flash_blocks[i].size, slow);
+				if (flash->set_block_lock)
+					flash->set_block_lock(dev, addr, true);
 				addr += flash_blocks[i].size;
 			}
 		}
@@ -427,9 +462,9 @@ int main(int argc, char *argv[])
 
 		printf("Reading flash: ");
 
-		cx_read_mem(dev, flash_base, FLASH_SIZE, buf, MA_WORD);
+		cx_read_mem(dev, flash_base, flash->size, buf, MA_WORD);
 		printf("done\n");
-		if (fwrite(buf, 1, FLASH_SIZE, f) != FLASH_SIZE) {
+		if (fwrite(buf, 1, flash->size, f) != flash->size) {
 			fprintf(stderr, "Error writing file\n");
 			exit(5);
 		}
