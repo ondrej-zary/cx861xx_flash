@@ -1,13 +1,18 @@
-cx861xx_flash - Conexant CX861xx USB Boot Flash Utility
-================================================================
-Copyright (c) 2012 Ondrej Zary - http://www.rainbow-software.org
+cx861xx_flash - Conexant CX861xx and CX82xxx USB Boot Flash Utility
+===================================================================
+Copyright (c) 2015 Ondrej Zary - http://www.rainbow-software.org
 
 This utility can access external flash ROM on boards/devices with Conexant CX861xx
 (CX86111/CX86113) Network Processors, such as Flarion Desktop Modem.
 
+Also boards/devices with Conexant CX82xxx (CX82310/CX82110/CX82100) chips are
+supported (ADSL modems/routers).
+
+
 Requirements:
 -------------
 Linux, GCC, Make, Libusb-1.0
+
 Probably works correctly only on little endian machines (such as x86).
 
 Compilation:
@@ -15,13 +20,23 @@ Compilation:
 $ make
 
 
+Supported flash chips:
+----------------------
+ * Intel 28F320C3B
+ * MXIC MX29LV160BB
+
+
 Notes:
 ------
-Only Intel 28F320C3B flash is supported for now.
+USB flashing is slow because of giant overhead - each write to flash needs
+its own USB packet. Programming each flash 16-bit word needs 1 to 4 writes.
 
-USB flashing is slow. The first working version ran for more than two hours.
+The first working version ran for more than two hours (with Intel 28F320C3B).
 Now after three optimizations, flashing a typical image takes about 20 minutes
- - depends on how many empty (FFFF) words are present.
+- depends on how many empty (FFFF) words are present.
+
+Flashing MXIC chips is slower (about 60 minutes) because the 4 writes needed to
+program a word cannot be merged into a single USB packet.
 
 The processor must be in USB Boot mode for the utility to work.
 
@@ -50,6 +65,16 @@ shorted. You can then remove the short.
 v2: Remove bottom plastic and use a piece of wire to connect holes marked
 "USB BOOT".
 
-Conect USB cable to PC. You should something like this in lsusb:
+Conect USB cable to a PC. You should see something like this in lsusb:
 
     Bus 002 Device 002: ID 0572:cafc Conexant Systems (Rockwell), Inc. CX861xx ROM Boot Loader
+
+
+USB Boot mode on CX82310 ADSL routers:
+--------------------------------------
+Remove the cover and look for JP1 jumper next to the USB connector.
+Short it and power on.
+
+Conect USB cable to a PC. You should see something like this in lsusb:
+
+    Bus 001 Device 003: ID 0572:cafd Conexant Systems (Rockwell), Inc. CX82310 ROM Boot Loader
