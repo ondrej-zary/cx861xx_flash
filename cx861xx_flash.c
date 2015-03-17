@@ -9,6 +9,7 @@
 
 #define CONEXANT_VENDOR		0x0572
 #define CX861XX_BOOT_PROD	0xCAFC
+#define CX82XXX_BOOT_PROD	0xCAFD
 
 #define CX_EP_CMD	0x01	/* Bulk/interrupt in/out */
 #define CMD_TIMEOUT     100	/* msecs */
@@ -21,14 +22,22 @@
  0x04000000: FLASH (disabled in boot loader mode)
  0x08000000: SDRAM (disabled on boot)
 */
-#define CX_IO_BASE	0x00600000
-#define CX_FLASH_BASE	0x04000000
+#define CX861XX_IO_BASE		0x00600000
+#define CX861XX_FLASH_ENABLE	(CX861XX_IO_BASE + 4)
 
-#define CX_FLASH_ENABLE	(CX_IO_BASE + 4)
+/* CX82xxx memory map:
+ 0x00000000: either internal ROM (boot loader mode) or external flash (normal boot) mapped here
+ 0x00180000: 32KB internal SRAM (with running copy of boot loader)
+ 0x00300000: I/O (registers and devices)
+ 0x00400000: FLASH (always enabled)
+ 0x00800000: SDRAM (disabled on boot, controlled by bit 0 of EMCR byte at 0x00350010)
+*/
 
 #define u8  unsigned char
 #define u16 unsigned short
 #define u32 unsigned int
+
+u32 flash_base;
 
 enum cx_fw_cmd {
 	FW_CMD_ERR,
@@ -172,13 +181,13 @@ int cx_write_mem(libusb_device_handle *dev, u32 addr, u32 count, u8 *buf, u8 acc
 u16 cx_flash_read(libusb_device_handle *dev, u32 addr) {
 	u16 data;
 
-	cx_read_mem(dev, CX_FLASH_BASE + addr, 2, (void *)&data, MA_WORD);
+	cx_read_mem(dev, flash_base + addr, 2, (void *)&data, MA_WORD);
 
 	return data;
 }
 
 void cx_flash_write(libusb_device_handle *dev, u32 addr, u16 data) {
-	cx_write_mem(dev, CX_FLASH_BASE + addr, 2, (void *)&data, MA_WORD);
+	cx_write_mem(dev, flash_base + addr, 2, (void *)&data, MA_WORD);
 }
 
 void flash_decode_status(u16 status) {
@@ -238,7 +247,7 @@ void flash_optimized_program_word(libusb_device_handle *dev, u32 addr, u16 data)
 	/* merge PROGRAM command and data into one write */
 	buf[0] = FLASH_CMD_PROGRAM;
 	buf[1] = data;
-	cx_write_mem(dev, CX_FLASH_BASE + addr - 2, 4, (void *)buf, MA_WORD);
+	cx_write_mem(dev, flash_base + addr - 2, 4, (void *)buf, MA_WORD);
 }
 
 bool flash_program_block(libusb_device_handle *dev, u32 addr, u16 *data, u32 size, bool slow) {
@@ -327,6 +336,7 @@ void usage() {
 int main(int argc, char *argv[])
 {
 	FILE *f;
+	bool cx861xx = false;
 
 	printf("cx861xx_flash v%s - Conexant CX861xx USB Boot Flash Utility\n", VERSION);
 	printf("Copyright (c) 2012 Ondrej Zary - http://www.rainbow-software.org\n\n");
@@ -335,13 +345,18 @@ int main(int argc, char *argv[])
 	libusb_set_debug(NULL, 3);
 
 	libusb_device_handle *dev = libusb_open_device_with_vid_pid(NULL, CONEXANT_VENDOR, CX861XX_BOOT_PROD);
-	if (dev) {
-		printf("Device found at bus %d, address %d\n\n", libusb_get_bus_number(libusb_get_device(dev)),
-								 libusb_get_device_address(libusb_get_device(dev)));
-	} else {
+	if (dev)
+		cx861xx = true;
+	else
+		dev = libusb_open_device_with_vid_pid(NULL, CONEXANT_VENDOR, CX82XXX_BOOT_PROD);
+	if (!dev) {
 		fprintf(stderr, "No device detected. Make sure the board is properly connected and processor is in USB Boot mode.\n");
 		exit(1);
 	}
+	flash_base = cx861xx ? 0x04000000 : 0x0400000;
+	printf("%s device found at bus %d, address %d\n\n", cx861xx ? "CX861xx" : "CX82xxx",
+							    libusb_get_bus_number(libusb_get_device(dev)),
+							    libusb_get_device_address(libusb_get_device(dev)));
 
 	int err = libusb_claim_interface(dev, 0);
 	if (err) {
@@ -366,9 +381,10 @@ int main(int argc, char *argv[])
 		exit(4);
 	}
 
-	/* Enable FLASH access */
-	u8 data = 1;
-	cx_write_mem(dev, CX_FLASH_ENABLE, 1, &data, MA_BYTE);
+	if (cx861xx) {	/* Enable FLASH access */
+		u8 data = 1;
+		cx_write_mem(dev, CX861XX_FLASH_ENABLE, 1, &data, MA_BYTE);
+	}
 
 	/* Send READ ARRAY command to reset flash */
 	cx_flash_write(dev, 0, FLASH_CMD_READ);
@@ -411,7 +427,7 @@ int main(int argc, char *argv[])
 
 		printf("Reading flash: ");
 
-		cx_read_mem(dev, CX_FLASH_BASE, FLASH_SIZE, buf, MA_WORD);
+		cx_read_mem(dev, flash_base, FLASH_SIZE, buf, MA_WORD);
 		printf("done\n");
 		if (fwrite(buf, 1, FLASH_SIZE, f) != FLASH_SIZE) {
 			fprintf(stderr, "Error writing file\n");
