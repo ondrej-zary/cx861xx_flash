@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <libusb-1.0/libusb.h>
 
-#define VERSION "1.0"
+#define VERSION "1.1"
 
 #define CONEXANT_VENDOR		0x0572
 #define CX861XX_BOOT_PROD	0xCAFC
@@ -474,8 +474,8 @@ int main(int argc, char *argv[])
 	FILE *f;
 	bool cx861xx = false;
 
-	printf("cx861xx_flash v%s - Conexant CX861xx USB Boot Flash Utility\n", VERSION);
-	printf("Copyright (c) 2012 Ondrej Zary - http://www.rainbow-software.org\n\n");
+	printf("cx861xx_flash v%s - Conexant CX861xx and CX82xxx USB Boot Flash Utility\n", VERSION);
+	printf("Copyright (c) 2015 Ondrej Zary - http://www.rainbow-software.org\n\n");
 
 	libusb_init(NULL);
 	libusb_set_debug(NULL, 3);
