@@ -172,6 +172,16 @@ void cx_flash_write(libusb_device_handle *dev, u32 addr, u16 data) {
 	cx_write_mem(dev, flash_base + addr, 2, (void *)&data, MA_WORD);
 }
 
+void cx_flash_cmd(libusb_device_handle *dev, u8 cmd) {
+	/* flash access is strictly 16-bit
+	   As the CPU does not have address line 0 (HC00), flash address lines are shifted by one
+	   (A0 is connected to HC01, A1 to HC02...). This means that all addresses must be shifted left by 1.
+	*/
+	cx_flash_write(dev, 0xaaa, 0xaa); /* 0x555 */
+	cx_flash_write(dev, 0x554, 0x55); /* 0x2aa */
+	cx_flash_write(dev, 0xaaa, cmd);  /* 0x555 */
+}
+
 /********** Intel flash **********/
 
 #define INTEL_CMD_READ		0xff	/* Read Array */
@@ -312,6 +322,92 @@ void intel_set_block_lock(libusb_device_handle *dev, u32 addr, bool lock) {
 	cx_flash_write(dev, addr, lock ? INTEL_CMD_LOCK : INTEL_CMD_UNLOCK);
 }
 
+/********** AMD flash **********/
+
+#define AMD_CMD_RESET		0xf0	/* Reset */
+#define AMD_CMD_PROGRAM		0xa0	/* Program */
+#define AMD_CMD_ERASE_PREPARE	0x80	/* Chip/Sector Erase Prepare*/
+#define AMD_CMD_ERASE_CHIP	0x10	/* Chip Erase Confirm */
+#define AMD_CMD_ERASE_SECTOR	0x30	/* Sector Erase Confirm */
+#define AMD_CMD_SUSPEND		0xb0	/* Sector Erase Suspend */
+#define AMD_CMD_RESUME		0x30	/* Sector Erase Resume */
+
+#define AMD_ST_DATAPOLL		(1 << 7)	/* DATA polling */
+#define AMD_ST_TIMEOUT		(1 << 5)	/* Exceeded Timing Limits */
+
+bool amd_erase_block(libusb_device_handle *dev, u32 addr) {
+	u16 status;
+	u32 i = 0;
+
+	printf("Erasing block     0x%06x: ", addr);
+	fflush(stdout);
+
+	cx_flash_cmd(dev, AMD_CMD_ERASE_PREPARE);
+	cx_flash_write(dev, 0xaaa, 0xaa); /* 0x555 */
+	cx_flash_write(dev, 0x554, 0x55); /* 0x2aa */
+	cx_flash_write(dev, addr, AMD_CMD_ERASE_SECTOR);
+
+	/* DATA polling */
+	do {
+		status = cx_flash_read(dev, addr);
+		if (!(status & AMD_ST_DATAPOLL) && (status & AMD_ST_TIMEOUT)) {
+			printf("Error: TIMEOUT!\n");
+			cx_flash_write(dev, 0, AMD_CMD_RESET);
+			return false;
+		}
+		if (i % 4 == 0) {
+			printf(".");
+			fflush(stdout);
+		}
+		i++;
+	} while (!(status & AMD_ST_DATAPOLL));
+
+	printf("\n");
+
+	return true;
+}
+
+bool amd_program_block(libusb_device_handle *dev, u32 addr, u16 *data, u32 size, bool slow) {
+	u16 status;
+	u32 i;
+
+	printf("Programming block 0x%06x: ", addr);
+	fflush(stdout);
+
+	/* Program each 16-byte word */
+	for (i = 0; i < size / 2; i++) {
+		/* don't program FFFF words */
+		if (data[i] == 0xffff)
+			continue;
+
+		if (i % 512 == 0) {	/* each 1 KB */
+			printf(".");
+			fflush(stdout);
+		}
+
+		cx_flash_cmd(dev, AMD_CMD_PROGRAM);
+		cx_flash_write(dev, addr + i * 2, data[i]);
+
+		/* USB is so slow that we don't need to wait for programming to end */
+		if (slow) {
+			/* But it might be useful so it's an option */
+			/* DATA polling */
+			do {
+				status = cx_flash_read(dev, addr + i * 2);
+				if (status != data[i] && (status & AMD_ST_TIMEOUT)) {
+					printf("Error: TIMEOUT!\n");
+					cx_flash_write(dev, 0, AMD_CMD_RESET);
+					return false;
+				}
+			} while (status != data[i]);
+		}
+	}
+
+	printf("\n");
+
+	return true;
+}
+
 /********** flash parameters **********/
 
 struct flash_chip supported_chips[] = {
@@ -326,6 +422,18 @@ struct flash_chip supported_chips[] = {
 		.erase_block = intel_erase_block,
 		.program_block = intel_program_block,
 	},
+	{
+		.mfg = 0x00c2, .dev = 0x2249, .name = "MXIC MX29LV160BB", .size = 2*1024*1024,
+		.blocks = {
+				{ .count = 1,	.size = 16384 },
+				{ .count = 2,	.size = 8192 },
+				{ .count = 1,	.size = 32768 },
+				{ .count = 31,	.size = 65536 },
+				{ .count = 0 }	/* end marker */
+		},
+		.erase_block = amd_erase_block,
+		.program_block = amd_program_block,
+	},
 	{ .mfg = 0 }	/* end marker */
 };
 
@@ -333,7 +441,7 @@ struct flash_chip *flash_identify(libusb_device_handle *dev) {
 	struct flash_chip *flash = NULL;
 
 	/* Send READ IDENTIFIER command */
-	cx_flash_write(dev, 0, FLASH_CMD_ID);
+	cx_flash_cmd(dev, FLASH_CMD_ID);
 
 	/* Read IDs */
 	u16 flash_mfg = cx_flash_read(dev, 0);
@@ -341,6 +449,7 @@ struct flash_chip *flash_identify(libusb_device_handle *dev) {
 
 	/* Send READ ARRAY command (exit identifier mode) */
 	cx_flash_write(dev, 0, INTEL_CMD_READ);
+	cx_flash_write(dev, 0, AMD_CMD_RESET);
 
 	printf("Flash ID: Mfg ID=0x%04x, Device ID=0x%04x: ", flash_mfg, flash_dev);
 	for (int i = 0; supported_chips[i].mfg != 0; i++)
@@ -409,6 +518,7 @@ int main(int argc, char *argv[])
 
 	/* Send READ ARRAY command to reset flash */
 	cx_flash_write(dev, 0, INTEL_CMD_READ);
+	cx_flash_write(dev, 0, AMD_CMD_RESET);
 
 	struct flash_chip *flash = flash_identify(dev);
 	if (!flash) {
