@@ -24,6 +24,7 @@ Supported flash chips:
 ----------------------
  * Intel 28F320C3B
  * AMD Am29LV160DB
+ * Fujitsu MBM29LV160B
  * MXIC MX29LV160B
 
 
