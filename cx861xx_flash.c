@@ -468,6 +468,18 @@ struct flash_chip supported_chips[] = {
 		.program_block = amd_program_block,
 	},
 	{
+		.mfg = 0x0020, .dev = 0x2249, .name = "ST M29W160BB", .size = 2*1024*1024,
+		.blocks = {
+				{ .count = 1,	.size = 16384 },
+				{ .count = 2,	.size = 8192 },
+				{ .count = 1,	.size = 32768 },
+				{ .count = 31,	.size = 65536 },
+				{ .count = 0 }	/* end marker */
+		},
+		.erase_block = amd_erase_block,
+		.program_block = amd_program_block,
+	},
+	{
 		.mfg = 0x00ad, .dev = 0x2249, .name = "Hynix HY29LV160B", .size = 2*1024*1024,
 		.blocks = {
 				{ .count = 1,	.size = 16384 },
