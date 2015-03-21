@@ -331,6 +331,9 @@ void intel_set_block_lock(libusb_device_handle *dev, u32 addr, bool lock) {
 #define AMD_CMD_ERASE_SECTOR	0x30	/* Sector Erase Confirm */
 #define AMD_CMD_SUSPEND		0xb0	/* Sector Erase Suspend */
 #define AMD_CMD_RESUME		0x30	/* Sector Erase Resume */
+#define AMD_CMD_UNLOCK_BYPASS	0x20	/* Unlock Bypass */
+#define AMD_CMD_BYPASS_RESET1	0x90	/* Unlock Bypass Reset (1st) */
+#define AMD_CMD_BYPASS_RESET2	0x00	/* Unlock Bypass Reset (2nd) */
 
 #define AMD_ST_DATAPOLL		(1 << 7)	/* DATA polling */
 #define AMD_ST_TIMEOUT		(1 << 5)	/* Exceeded Timing Limits */
@@ -367,6 +370,15 @@ bool amd_erase_block(libusb_device_handle *dev, u32 addr) {
 	return true;
 }
 
+void amd_optimized_program_word(libusb_device_handle *dev, u32 addr, u16 data) {
+	u16 buf[2];
+
+	/* merge PROGRAM command and data into one write */
+	buf[0] = AMD_CMD_PROGRAM;
+	buf[1] = data;
+	cx_write_mem(dev, flash_base + addr - 2, 4, (void *)buf, MA_WORD);
+}
+
 bool amd_program_block(libusb_device_handle *dev, u32 addr, u16 *data, u32 size, bool slow) {
 	u16 status;
 	u32 i;
@@ -374,6 +386,7 @@ bool amd_program_block(libusb_device_handle *dev, u32 addr, u16 *data, u32 size,
 	printf("Programming block 0x%06x: ", addr);
 	fflush(stdout);
 
+	cx_flash_cmd(dev, AMD_CMD_UNLOCK_BYPASS);
 	/* Program each 16-byte word */
 	for (i = 0; i < size / 2; i++) {
 		/* don't program FFFF words */
@@ -385,8 +398,12 @@ bool amd_program_block(libusb_device_handle *dev, u32 addr, u16 *data, u32 size,
 			fflush(stdout);
 		}
 
-		cx_flash_cmd(dev, AMD_CMD_PROGRAM);
-		cx_flash_write(dev, addr + i * 2, data[i]);
+		if (i == 0) {
+			/* first word can't be optimized */
+			cx_flash_write(dev, addr, AMD_CMD_PROGRAM);
+			cx_flash_write(dev, addr + i * 2, data[i]);
+		} else
+			amd_optimized_program_word(dev, addr + i * 2, data[i]);
 
 		/* USB is so slow that we don't need to wait for programming to end */
 		if (slow) {
@@ -396,12 +413,16 @@ bool amd_program_block(libusb_device_handle *dev, u32 addr, u16 *data, u32 size,
 				status = cx_flash_read(dev, addr + i * 2);
 				if (status != data[i] && (status & AMD_ST_TIMEOUT)) {
 					printf("Error: TIMEOUT!\n");
+					cx_flash_write(dev, 0, AMD_CMD_BYPASS_RESET1);
+					cx_flash_write(dev, 0, AMD_CMD_BYPASS_RESET2);
 					cx_flash_write(dev, 0, AMD_CMD_RESET);
 					return false;
 				}
 			} while (status != data[i]);
 		}
 	}
+	cx_flash_write(dev, 0, AMD_CMD_BYPASS_RESET1);
+	cx_flash_write(dev, 0, AMD_CMD_BYPASS_RESET2);
 
 	printf("\n");
 
