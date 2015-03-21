@@ -22,6 +22,7 @@ $ make
 
 Supported flash chips:
 ----------------------
+ * Intel 28F160B3B
  * Intel 28F160C3B
  * Intel 28F320C3B
  * AMD Am29LV160DB

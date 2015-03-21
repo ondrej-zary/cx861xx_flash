@@ -433,6 +433,16 @@ bool amd_program_block(libusb_device_handle *dev, u32 addr, u16 *data, u32 size,
 
 struct flash_chip supported_chips[] = {
 	{
+		.mfg = 0x0089, .dev = 0x8891, .name = "Intel 28F160B3B", .size = 2*1024*1024,
+		.blocks = {
+				{ .count = 8,	.size = 8192 },
+				{ .count = 31,	.size = 65536 },
+				{ .count = 0 }	/* end marker */
+		},
+		.erase_block = intel_erase_block,
+		.program_block = intel_program_block,
+	},
+	{
 		.mfg = 0x0089, .dev = 0x88c3, .name = "Intel 28F160C3B", .size = 2*1024*1024,
 		.blocks = {
 				{ .count = 8,	.size = 8192 },
