@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <libusb-1.0/libusb.h>
 
-#define VERSION "1.1"
+#define VERSION "1.2"
 
 #define CONEXANT_VENDOR		0x0572
 #define CX861XX_BOOT_PROD	0xCAFC
