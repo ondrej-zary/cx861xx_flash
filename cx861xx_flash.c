@@ -423,7 +423,7 @@ struct flash_chip supported_chips[] = {
 		.program_block = intel_program_block,
 	},
 	{
-		.mfg = 0x00c2, .dev = 0x2249, .name = "MXIC MX29LV160BB", .size = 2*1024*1024,
+		.mfg = 0x00c2, .dev = 0x2249, .name = "MXIC MX29LV160B", .size = 2*1024*1024,
 		.blocks = {
 				{ .count = 1,	.size = 16384 },
 				{ .count = 2,	.size = 8192 },
