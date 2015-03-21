@@ -23,20 +23,17 @@ $ make
 Supported flash chips:
 ----------------------
  * Intel 28F320C3B
- * MXIC MX29LV160BB
+ * MXIC MX29LV160B
 
 
 Notes:
 ------
 USB flashing is slow because of giant overhead - each write to flash needs
-its own USB packet. Programming each flash 16-bit word needs 1 to 4 writes.
+its own USB packet.
 
 The first working version ran for more than two hours (with Intel 28F320C3B).
-Now after three optimizations, flashing a typical image takes about 20 minutes
-- depends on how many empty (FFFF) words are present.
-
-Flashing MXIC chips is slower (about 60 minutes) because the 4 writes needed to
-program a word cannot be merged into a single USB packet.
+Now after three optimizations, flashing a typical image takes about 20 minutes,
+depending on how many empty (FFFF) words are present.
 
 The processor must be in USB Boot mode for the utility to work.
 
